@@ -1,3 +1,4 @@
+
 name: Build Cecilia Genius Android
 
 on:
@@ -30,4 +31,4 @@ jobs:
         with:
           name: cecilia-genius-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
+
