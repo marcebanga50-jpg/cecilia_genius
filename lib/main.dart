@@ -162,6 +162,7 @@ class ModulePage extends StatelessWidget {
   }
 }
 
+
 class CalculatorPage extends StatefulWidget {
   const CalculatorPage({super.key});
 
@@ -170,124 +171,186 @@ class CalculatorPage extends StatefulWidget {
 }
 
 class _CalculatorPageState extends State<CalculatorPage> {
-  String display = '0';
-  double? firstNumber;
-  String? operation;
-  bool newNumber = true;
+  String expression = '';
+  String result = '0';
+  bool justCalculated = false;
+
+  final List<Map<String, String>> history = [];
 
   void press(String key) {
     setState(() {
       if (key == 'AC') {
-        display = '0';
-        firstNumber = null;
-        operation = null;
-        newNumber = true;
+        expression = '';
+        result = '0';
+        justCalculated = false;
         return;
       }
 
       if (key == '⌫') {
-        if (!newNumber && display.length > 1) {
-          display = display.substring(0, display.length - 1);
-        } else {
-          display = '0';
+        if (justCalculated) {
+          expression = '';
+          result = '0';
+          justCalculated = false;
+        } else if (expression.isNotEmpty) {
+          expression = expression.substring(0, expression.length - 1);
         }
-        return;
-      }
-
-      if (key == '±') {
-        if (display != '0') {
-          display = display.startsWith('-')
-              ? display.substring(1)
-              : '-$display';
-        }
-        return;
-      }
-
-      if (key == '%') {
-        display = _format(_number / 100);
-        return;
-      }
-
-      if (key == '.') {
-        if (newNumber) {
-          display = '0.';
-          newNumber = false;
-        } else if (!display.contains('.')) {
-          display += '.';
-        }
-        return;
-      }
-
-      if (['+', '−', '×', '÷'].contains(key)) {
-        firstNumber = _number;
-        operation = key;
-        newNumber = true;
         return;
       }
 
       if (key == '=') {
-        if (firstNumber != null && operation != null) {
-          final second = _number;
-          double result = 0;
-
-          switch (operation) {
-            case '+':
-              result = firstNumber! + second;
-              break;
-            case '−':
-              result = firstNumber! - second;
-              break;
-            case '×':
-              result = firstNumber! * second;
-              break;
-            case '÷':
-              if (second == 0) {
-                display = 'Error';
-                firstNumber = null;
-                operation = null;
-                newNumber = true;
-                return;
-              }
-              result = firstNumber! / second;
-              break;
-          }
-
-          display = _format(result);
-          firstNumber = null;
-          operation = null;
-          newNumber = true;
-        }
+        calculate();
         return;
       }
 
-      if (RegExp(r'^[0-9]$').hasMatch(key)) {
-        if (newNumber || display == '0' || display == 'Error') {
-          display = key;
-          newNumber = false;
-        } else if (display.length < 15) {
-          display += key;
+      final isOperator = ['+', '−', '×', '÷'].contains(key);
+
+      if (justCalculated) {
+        if (isOperator) {
+          expression = result;
+        } else {
+          expression = '';
+        }
+        justCalculated = false;
+      }
+
+      if (expression.length >= 80) return;
+
+      if (key == '.') {
+        final parts = expression.split(RegExp(r'[+\−×÷()]'));
+        if (parts.isNotEmpty && parts.last.contains('.')) return;
+
+        if (expression.isEmpty ||
+            RegExp(r'[+\−×÷(]$').hasMatch(expression)) {
+          expression += '0';
         }
       }
+
+      expression += key;
     });
   }
 
-  double get _number => double.tryParse(display) ?? 0;
+  void calculate() {
+    if (expression.trim().isEmpty) return;
 
-  String _format(double value) {
-    if (!value.isFinite) return 'Error';
-    if (value.abs() < 1e-10) return '0';
-    if (value.abs() < 1e12 && value == value.roundToDouble()) {
+    try {
+      final value = ExpressionParser(expression).parse();
+      final answer = formatNumber(value);
+
+      setState(() {
+        result = answer;
+        justCalculated = true;
+
+        history.insert(0, {
+          'expression': expression,
+          'result': answer,
+        });
+
+        if (history.length > 20) {
+          history.removeLast();
+        }
+      });
+    } catch (_) {
+      setState(() {
+        result = 'Erreur';
+        justCalculated = false;
+      });
+    }
+  }
+
+  String formatNumber(double value) {
+    if (!value.isFinite) return 'Erreur';
+    if (value == 0) return '0';
+
+    if (value.abs() < 1e12 &&
+        value == value.roundToDouble()) {
       return value.toInt().toString();
     }
+
     return value.toStringAsPrecision(10);
   }
 
+  void showHistory() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, refreshDialog) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF20283A),
+              title: const Text(
+                'Historique des calculs',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                height: 350,
+                child: history.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'Aucun calcul enregistré',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: history.length,
+                        itemBuilder: (context, index) {
+                          final item = history[index];
+
+                          return ListTile(
+                            title: Text(
+                              item['expression']!,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '= ${item['result']}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                              ),
+                            ),
+                            onTap: () {
+                              setState(() {
+                                expression = item['expression']!;
+                                result = item['result']!;
+                                justCalculated = true;
+                              });
+                              Navigator.pop(dialogContext);
+                            },
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      history.clear();
+                    });
+                    refreshDialog(() {});
+                  },
+                  child: const Text('Effacer historique'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Fermer'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   Widget calculatorButton(String label) {
-    final isOperator = ['÷', '×', '−', '+', '='].contains(label);
+    final isOperator =
+        ['÷', '×', '−', '+', '='].contains(label);
 
     return Expanded(
       child: Padding(
-        padding: const EdgeInsets.all(5),
+        padding: const EdgeInsets.all(4),
         child: ElevatedButton(
           onPressed: () => press(label),
           style: ElevatedButton.styleFrom(
@@ -295,7 +358,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
                 ? const Color(0xFF6F70E8)
                 : const Color(0xFF252B40),
             foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 20),
+            padding: const EdgeInsets.symmetric(vertical: 17),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(14),
             ),
@@ -303,7 +366,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
           child: Text(
             label,
             style: const TextStyle(
-              fontSize: 23,
+              fontSize: 22,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -315,16 +378,23 @@ class _CalculatorPageState extends State<CalculatorPage> {
   @override
   Widget build(BuildContext context) {
     final rows = [
-      ['AC', '±', '%', '÷'],
-      ['7', '8', '9', '×'],
-      ['4', '5', '6', '−'],
-      ['1', '2', '3', '+'],
-      ['0', '.', '⌫', '='],
+      ['AC', '(', ')', '⌫'],
+      ['7', '8', '9', '÷'],
+      ['4', '5', '6', '×'],
+      ['1', '2', '3', '−'],
+      ['0', '.', '%', '+'],
     ];
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scientific Calculator'),
+        actions: [
+          IconButton(
+            onPressed: showHistory,
+            icon: const Icon(Icons.history),
+            tooltip: 'Historique',
+          ),
+        ],
       ),
       backgroundColor: const Color(0xFF101522),
       body: SafeArea(
@@ -333,30 +403,202 @@ class _CalculatorPageState extends State<CalculatorPage> {
             const Spacer(),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: 12,
+              ),
+              alignment: Alignment.centerRight,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true,
+                child: Text(
+                  expression.isEmpty ? '0' : expression,
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 30,
+                  ),
+                ),
+              ),
+            ),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 12,
+              ),
               alignment: Alignment.centerRight,
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
-                  display,
+                  result,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 52,
+                    fontSize: 48,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 18),
             ...rows.map(
               (row) => Row(
                 children: row.map(calculatorButton).toList(),
               ),
             ),
-            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(4),
+                    child: ElevatedButton(
+                      onPressed: () => press('='),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF28A879),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 17,
+                        ),
+                      ),
+                      child: const Text(
+                        '=',
+                        style: TextStyle(
+                          fontSize: 25,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
           ],
         ),
       ),
     );
+  }
+}
+
+class ExpressionParser {
+  final String input;
+  int position = 0;
+
+  ExpressionParser(String expression)
+      : input = expression
+            .replaceAll('×', '*')
+            .replaceAll('÷', '/')
+            .replaceAll('−', '-')
+            .replaceAll(' ', '');
+
+  double parse() {
+    final value = parseExpression();
+
+    if (position != input.length) {
+      throw const FormatException('Expression invalide');
+    }
+
+    return value;
+  }
+
+  double parseExpression() {
+    double value = parseTerm();
+
+    while (position < input.length) {
+      if (match('+')) {
+        value += parseTerm();
+      } else if (match('-')) {
+        value -= parseTerm();
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  double parseTerm() {
+    double value = parseUnary();
+
+    while (position < input.length) {
+      if (match('*')) {
+        value *= parseUnary();
+      } else if (match('/')) {
+        final divisor = parseUnary();
+
+        if (divisor == 0) {
+          throw const FormatException('Division par zéro');
+        }
+
+        value /= divisor;
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  double parseUnary() {
+    if (match('+')) return parseUnary();
+    if (match('-')) return -parseUnary();
+
+    return parsePrimary();
+  }
+
+  double parsePrimary() {
+    double value;
+
+    if (match('(')) {
+      value = parseExpression();
+
+      if (!match(')')) {
+        throw const FormatException('Parenthèse manquante');
+      }
+    } else {
+      value = parseNumber();
+    }
+
+    while (match('%')) {
+      value /= 100;
+    }
+
+    return value;
+  }
+
+  double parseNumber() {
+    final start = position;
+    bool hasDigit = false;
+
+    while (position < input.length &&
+        RegExp(r'[0-9]').hasMatch(input[position])) {
+      position++;
+      hasDigit = true;
+    }
+
+    if (position < input.length && input[position] == '.') {
+      position++;
+
+      while (position < input.length &&
+          RegExp(r'[0-9]').hasMatch(input[position])) {
+        position++;
+        hasDigit = true;
+      }
+    }
+
+    if (!hasDigit) {
+      throw const FormatException('Nombre invalide');
+    }
+
+    return double.parse(input.substring(start, position));
+  }
+
+  bool match(String character) {
+    if (position < input.length &&
+        input[position] == character) {
+      position++;
+      return true;
+    }
+
+    return false;
   }
 }
